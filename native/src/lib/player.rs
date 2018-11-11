@@ -3,6 +3,7 @@ use tokio_core::reactor::{ Core, Remote };
 use futures::{ Future, future };
 use futures::sync::oneshot;
 use std::{ thread };
+use std::sync::{ Mutex, Arc };
 
 use librespot::core::authentication::Credentials;
 use librespot::core::config::SessionConfig;
@@ -13,9 +14,14 @@ use librespot::playback::config::PlayerConfig;
 use librespot::playback::audio_backend;
 use librespot::playback::player::Player;
 
+pub struct PlayerState {
+    is_playing: bool,
+}
+
 pub struct SpotifyPlayer {
     remote: Remote,
-    player: Player
+    player: Player,
+    state: Arc<Mutex<PlayerState>>
 }
 
 impl SpotifyPlayer {
@@ -33,8 +39,6 @@ impl SpotifyPlayer {
 
             let _ = remote_tx.send(handle.remote().clone());
 
-            info!("Getting session...");
-
             let session = core.run(Session::connect(
                 session_config,
                 credentials,
@@ -42,8 +46,6 @@ impl SpotifyPlayer {
                 handle)).unwrap();
 
             let _ = session_tx.send(session);
-
-            info!("Starting main loop");
 
             core.run(future::empty::<(), ()>()).unwrap();
         });
@@ -57,21 +59,28 @@ impl SpotifyPlayer {
 
         SpotifyPlayer {
             remote: remote,
-            player: player
+            player: player,
+            state: Arc::new(Mutex::new(PlayerState {
+                is_playing: false
+            }))
         }
     }
 
-    pub fn play(&self, track_id: String) {
+    pub fn play(&mut self, track_id: String) {
         let track = SpotifyId::from_base62(&track_id).unwrap();
+
         info!("Track: {:?}", track);
 
         let end_of_track = self.player.load(track, true, 0);
+        let local_state = self.state.clone();
+
+        self.state.lock().unwrap().is_playing = true;        
 
         self.remote.spawn(move |_| {
-            info!("In remote thread");
+            end_of_track.then(move |_result| {
+                let mut state = local_state.lock().unwrap();
+                state.is_playing = false;
 
-            end_of_track.then(move |result| {
-                info!("Track playback ended {:?}", result);
                 Ok(())
             })
         });
@@ -79,5 +88,17 @@ impl SpotifyPlayer {
 
     pub fn stop(&self) {
         self.player.stop();
+    }
+
+    pub fn pause(&self) {
+        self.player.pause();
+    }
+
+    pub fn seek(&self, position_ms: u32) {
+        self.player.seek(position_ms);
+    }
+
+    pub fn is_playing(&self) -> bool {
+        self.state.lock().unwrap().is_playing
     }
 }

@@ -6,7 +6,6 @@ extern crate tokio_core;
 #[macro_use]
 extern crate log;
 extern crate futures;
-extern crate simple_logger;
 extern crate simple_logging;
 
 use log::{ LevelFilter };
@@ -37,13 +36,14 @@ declare_types! {
         }
 
         method play(mut cx) {
-            let this = cx.this();   
+            let mut this = cx.this();
+            let track_id: Handle<JsString> = cx.argument::<JsString>(0)?;
 
             {
                 let guard = cx.lock();
-                let tester = this.borrow(&guard);
+                let mut spotify = this.borrow_mut(&guard);
                 
-                tester.player.play("5Fhn1eNY4Eexndp9DWHZnn".to_string());
+                spotify.player.play(track_id.value());
             }
 
             Ok(cx.boolean(true).upcast())
@@ -54,12 +54,52 @@ declare_types! {
 
             {
                 let guard = cx.lock();
-                let tester = this.borrow(&guard);
+                let spotify = this.borrow(&guard);
                 
-                tester.player.stop();
+                spotify.player.stop();
             }
 
-            Ok(cx.boolean(true).upcast())
+            Ok(cx.undefined().upcast())
+        }
+
+        method pause(mut cx) {
+            let this = cx.this();   
+
+            {
+                let guard = cx.lock();
+                let spotify = this.borrow(&guard);
+                
+                spotify.player.pause();
+            }
+
+            Ok(cx.undefined().upcast())
+        }
+
+        method seek(mut cx) {
+            let this = cx.this();
+            let position_ms: Handle<JsNumber> = cx.argument::<JsNumber>(0)?; 
+
+            {
+                let guard = cx.lock();
+                let spotify = this.borrow(&guard);
+                
+                spotify.player.seek(position_ms.value() as u32);
+            }
+
+            Ok(cx.undefined().upcast())
+        }
+
+        method is_playing(mut cx) {
+            let this = cx.this();   
+
+            let is_playing = {
+                let guard = cx.lock();
+                let spotify = this.borrow(&guard);
+                
+                spotify.player.is_playing()
+            };
+
+            Ok(cx.boolean(is_playing).upcast())
         }
     }
 }
