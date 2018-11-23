@@ -15,58 +15,14 @@ use neon::prelude::*;
 
 mod lib {
     pub mod player;
+    pub mod token;
 }
 
 use lib::player::SpotifyPlayer;
+use lib::token::{ AccessToken, JsAccessToken };
 
 pub struct Spotify {
     player: SpotifyPlayer
-}
-
-pub struct AccessToken {
-    token: String,
-    scope: Vec<String>,
-    expires_in: u32,
-}
-
-declare_types! {
-    pub class JsAccessToken for AccessToken {
-        init(mut cx) {
-            let token: Handle<JsString> = cx.argument::<JsString>(0)?;
-            let expires_in: Handle<JsNumber> = cx.argument::<JsNumber>(1)?;
-
-            Ok(AccessToken {
-                token: token.value(),
-                scope: vec![ ],
-                expires_in: expires_in.value() as u32,
-            })
-        }
-
-        method getToken(mut cx) {
-            let this = cx.this();
-            let val = {
-                let guard = cx.lock();
-                let instance = this.borrow(&guard);
-
-                instance.token.clone()
-            };
-
-            Ok(cx.string(val).upcast())
-        }
-
-        method getExpiry(mut cx) {
-            let this = cx.this();
-            let val = {
-                let guard = cx.lock();
-                let instance = this.borrow(&guard);
-
-                instance.expires_in.clone()
-            };
-
-            Ok(cx.number(val).upcast())
-        }
-
-    }
 }
 
 declare_types! {
@@ -93,7 +49,7 @@ declare_types! {
                 spotify.player.play(track_id.value());
             }
 
-            Ok(cx.boolean(true).upcast())
+            Ok(cx.undefined().upcast())
         }
 
         method stop(mut cx) {
@@ -136,7 +92,7 @@ declare_types! {
             Ok(cx.undefined().upcast())
         }
 
-        method is_playing(mut cx) {
+        method isPlaying(mut cx) {
             let this = cx.this();
 
             let is_playing = {
@@ -149,7 +105,7 @@ declare_types! {
             Ok(cx.boolean(is_playing).upcast())
         }
 
-        method get_token(mut cx) {
+        method getToken(mut cx) {
             let this = cx.this();
             let ctor = JsAccessToken::constructor(&mut cx)?;
 
@@ -163,32 +119,48 @@ declare_types! {
                 let guard = cx.lock();
                 let spotify = this.borrow(&guard);
 
-                spotify.player.get_token(
-                    client_id.value(),
-                    scopes.value(),
-                    |tok| {
-                        token = Some(AccessToken {
-                            token: tok.access_token,
-                            scope: vec![ ],
-                            expires_in: tok.expires_in
-                        });
-                    });
+                spotify.player.get_token(client_id.value(), scopes.value(), |tok| {
+                    match tok {
+                        Some(t) => {
+                            token = Some(AccessToken {
+                                token: t.access_token,
+                                scope: t.scope,
+                                expires_in: t.expires_in
+                            });
+                        },
+                        None => {
+                            token = None;
+                        }
+                    };
+                });
             }
 
-            let tok = token.unwrap();
+            match token {
+                Some(t) => {
+                    let scopes = JsArray::new(&mut cx, t.scope.len() as u32);
+                    for (i, scope) in t.scope.iter().enumerate() {
+                        let val = cx.string(scope);
+                        let _ = scopes.set(&mut cx, i as u32, val);
+                    }
 
-            let args: Vec<Handle<JsValue>> = vec![
-                cx.string(tok.token).upcast(),
-                cx.number(tok.expires_in).upcast()
-            ];
+                    let args: Vec<Handle<JsValue>> = vec![
+                        cx.string(t.token).upcast(),
+                        scopes.upcast(),
+                        cx.number(t.expires_in).upcast()
+                    ];
 
-            let access_token_instance = ctor.construct(&mut cx, args);
+                    let access_token_instance = ctor.construct(&mut cx, args);
 
-            let cb_args: Vec<Handle<JsValue>> = vec![
-                access_token_instance.unwrap().upcast(),
-            ];
+                    let cb_args: Vec<Handle<JsValue>> = vec![
+                        access_token_instance.unwrap().upcast(),
+                    ];
 
-            let _ = cb.call(&mut cx, JsNull::new(), cb_args);
+                    let _ = cb.call(&mut cx, JsNull::new(), cb_args);
+                },
+                None => {
+                    let _ = cb.call(&mut cx, JsNull::new(), vec![ JsUndefined::new() ]);
+                }
+            }
 
             Ok(cx.undefined().upcast())
         }

@@ -126,7 +126,7 @@ impl SpotifyPlayer {
     }
 
     pub fn get_token<F>(&self, client_id: String, scopes: String, cb: F)
-        where F: FnOnce(Token) {
+        where F: FnOnce(Option<Token>) {
 
         let local_session = self.session.clone();
         let (token_tx, token_rx) = oneshot::channel();
@@ -140,10 +140,11 @@ impl SpotifyPlayer {
 
         match token_rx.wait().unwrap() {
             Ok(r) => {
-                cb(r);
+                cb(Some(r));
             },
             Err(e) => {
                 error!("Cannot get token {:?}", e);
+                cb(None);
             }
         };
     }
